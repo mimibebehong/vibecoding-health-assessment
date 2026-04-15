@@ -90,6 +90,25 @@ d:/code_python/vibecoding/.venv/Scripts/python.exe health_assessment.py \
   --plot-file "data/health_curve_custom.png"
 ```
 
+### 6.3 辛辛那提数据集实测示例
+```bash
+d:/code_python/vibecoding/.venv/Scripts/python.exe health_assessment.py \
+  --input "D:\\code_python\\Project\\data\\25117DT故障数据CI指标\\辛辛那提数据集\\1st_test-allBearingCI-channel6.csv" \
+  --output "data/health_assessment_result_1st_test_channel6.csv" \
+  --plot \
+  --plot-file "data/health_index_curve_1st_test_channel6.png"
+```
+
+对应实测输出：
+
+- `rows=2156`
+- `start_health=0.109271`
+- `end_health=0.995483`
+- `max_health=0.995483`
+- `output=D:\code_python\vibecoding\data\health_assessment_result_1st_test_channel6.csv`
+- `plot_all=D:\code_python\vibecoding\data\health_index_curve_1st_test_channel6_all.png`
+- `plot_top3=D:\code_python\vibecoding\data\health_index_curve_1st_test_channel6_top3.png`
+
 ## 7. Python 函数级接口（内部）
 
 | 函数 | 签名 | 说明 |
