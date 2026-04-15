@@ -6,6 +6,7 @@ import pandas as pd
 
 
 def read_csv_with_fallback(csv_path: Path) -> pd.DataFrame:
+    """Read CSV using multiple common encodings for mixed-source industrial datasets."""
     encodings = ["utf-8-sig", "utf-8", "gb18030", "gbk", "latin1"]
     last_error = None
     for enc in encodings:
@@ -17,17 +18,20 @@ def read_csv_with_fallback(csv_path: Path) -> pd.DataFrame:
 
 
 def robust_mad(values: np.ndarray) -> float:
+    """Return a robust scale estimate derived from MAD (approximately std under normality)."""
     median = np.median(values)
     mad = np.median(np.abs(values - median))
     return float(1.4826 * mad + 1e-8)
 
 
 def compute_health_index(df: pd.DataFrame, baseline_ratio: float = 0.2) -> tuple[pd.DataFrame, list[str], np.ndarray]:
+    """Compute fault risk and health index (0=healthy, 1=degraded) from numeric indicators."""
     df_num = df.select_dtypes(include=[np.number]).copy()
     if df_num.shape[1] < 2:
         raise ValueError("Need at least 2 numeric columns (time + features or multiple features).")
 
     n_rows = len(df_num)
+    # Build a stable baseline window from early-life data while preventing extreme small/large windows.
     base_n = max(30, int(n_rows * baseline_ratio))
     base_n = min(base_n, max(5, n_rows // 2))
 
@@ -41,6 +45,7 @@ def compute_health_index(df: pd.DataFrame, baseline_ratio: float = 0.2) -> tuple
         feature_cols = list(df_num.columns)
 
     X = df_num[feature_cols].replace([np.inf, -np.inf], np.nan)
+    # Use interpolation first, then edge filling to avoid dropping samples.
     X = X.interpolate(limit_direction="both").bfill().ffill()
     Xv = X.to_numpy(dtype=float)
 
@@ -48,6 +53,7 @@ def compute_health_index(df: pd.DataFrame, baseline_ratio: float = 0.2) -> tuple
     end_window = Xv[-base_n:, :]
 
     med = np.median(baseline, axis=0)
+    # Robust per-feature scale mitigates outlier impact in vibration-like signals.
     scale = np.array([robust_mad(baseline[:, i]) for i in range(baseline.shape[1])])
 
     # Estimate degradation direction by comparing baseline vs end-window means.
@@ -55,6 +61,7 @@ def compute_health_index(df: pd.DataFrame, baseline_ratio: float = 0.2) -> tuple
     direction = np.where(np.abs(drift) < 1e-10, 1.0, np.sign(drift))
 
     z = (Xv - med) / scale
+    # Keep only deviation along degradation direction; opposite movement is treated as non-degrading.
     degradation = np.clip(direction * z, 0.0, None)
 
     # Weight features by drift magnitude so more sensitive indicators contribute more.
@@ -64,6 +71,7 @@ def compute_health_index(df: pd.DataFrame, baseline_ratio: float = 0.2) -> tuple
     w = w / (np.sum(w) + 1e-12)
 
     fused = degradation @ w
+    # Normalize by high quantile to reduce sensitivity to extreme spikes.
     q95 = float(np.quantile(fused, 0.95) + 1e-8)
     score = np.clip(fused / q95, 0.0, 3.0)
 
@@ -85,11 +93,13 @@ def save_comparison_plot(
     title: str,
     plot_path: Path,
 ) -> None:
+    """Save a dual-axis figure: raw indicators (left axis) vs health index (right axis)."""
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(11, 5.2), dpi=120)
 
     for idx, col in enumerate(feature_cols, start=1):
+        # Keep legend labels ASCII-only to avoid font glyph warnings on some environments.
         ax.plot(x_vals, result[col].to_numpy(), linewidth=1.0, alpha=0.75, label=f"raw_indicator_{idx}")
 
     ax2 = ax.twinx()
@@ -113,6 +123,7 @@ def save_comparison_plot(
 
 
 def main() -> None:
+    """CLI entry point for batch health assessment and optional visualization export."""
     parser = argparse.ArgumentParser(description="Bearing fault health assessment (0-1)")
     parser.add_argument("--input", required=True, help="Input CSV path")
     parser.add_argument("--output", default="data/health_assessment_result.csv", help="Output CSV path")
@@ -136,6 +147,7 @@ def main() -> None:
     result.to_csv(output_path, index=False, encoding="utf-8-sig")
 
     if args.plot:
+        # Infer x-axis from the first numeric column (typically time); fallback to sample index.
         num_cols = result.select_dtypes(include=[np.number]).columns.tolist()
         x_col = num_cols[0] if num_cols else None
         x_vals = result[x_col].to_numpy() if x_col else np.arange(len(result))
@@ -146,6 +158,7 @@ def main() -> None:
         suffix = plot_base.suffix if plot_base.suffix else ".png"
 
         full_plot_path = plot_base.with_name(f"{stem}_all{suffix}")
+        # Plot all indicators for completeness.
         save_comparison_plot(
             result=result,
             x_vals=x_vals,
@@ -160,6 +173,7 @@ def main() -> None:
         top_idx = np.argsort(np.abs(drift))[-top_n:][::-1]
         top_cols = [feature_cols[int(i)] for i in top_idx]
         top_plot_path = plot_base.with_name(f"{stem}_top3{suffix}")
+        # Plot top drifting indicators for clearer visual diagnosis.
         save_comparison_plot(
             result=result,
             x_vals=x_vals,
